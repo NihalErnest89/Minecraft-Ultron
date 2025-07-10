@@ -1,0 +1,327 @@
+#!/usr/bin/env python3
+"""
+Minecraft Ultron - Automated farming script using GameQuery mod API
+Uses the MCBot class for reliable communication with Minecraft
+"""
+
+import time
+import math
+import sys
+import os
+import keyboard
+import importlib.util
+from dotenv import load_dotenv
+
+# Import MCBot class from the mc-bot.py file
+spec = importlib.util.spec_from_file_location("mc_bot", "mc-bot.py")
+mc_bot = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mc_bot)
+MCBot = mc_bot.MCBot
+
+# --- Configuration ---
+
+load_dotenv()
+LOG_PATH = os.environ["LOG_PATH"] # path to your latest.log
+
+farms = {
+    "Ironman02": (-4152, 67, 4256),
+    "Steve": (-4100, 65, 4300),
+}
+
+HOME_COORDS = (-4188, 59, 4259)
+
+# --- Utilities ---
+
+def tail_log_and_wait_for(targets, timeout=60):
+    """Monitor log file for specific messages."""
+    print(f"🕵️ Waiting for any of {targets} in logs...")
+    start = time.time()
+    with open(LOG_PATH, 'r', encoding='utf-8') as f:
+        f.seek(0, os.SEEK_END)  # Go to end of log
+        while time.time() - start < timeout:
+            if keyboard.is_pressed('esc'):
+                print("❌ ESC pressed — exiting.")
+                exit()
+
+            line = f.readline()
+            if not line:
+                time.sleep(0.2)
+                continue
+
+            lower_line = line.lower()
+            for target in targets:
+                if target.lower() in lower_line:
+                    print(f"✅ Found in log: {line.strip()}")
+                    return target
+    print(f"❌ Timeout: none of {targets} found.")
+    return None
+
+def wait_for_farm_completion(client: MCBot, timeout: int = 300):
+    """Wait for farming to complete by monitoring log file."""
+    print("🌾 Monitoring farming progress via log file...")
+    
+    # Wait for either "Farm failed" or "goal reached" in the logs
+    result = tail_log_and_wait_for(["Farm failed", "goal reached"], timeout=timeout)
+    
+    if result is None:
+        print(f"❌ Timeout: Farming did not complete within {timeout} seconds")
+        return False
+    elif "Farm failed" in result:
+        print("❌ Farming failed!")
+        return False
+    else:
+        print("✅ Farming completed successfully!")
+        return True
+
+def wait_for_arrival(client, tolerance=0.2, stable_required=1, check_interval=1.0, max_wait=60):
+    """
+    Wait until the player stops moving (position is stable) for a number of checks.
+    Returns True if arrived, False if timeout.
+    """
+    stable_count = 0
+    last_pos = None
+    start_time = time.time()
+    while stable_count < stable_required:
+        pos = client.get_position()
+        if last_pos is not None:
+            dist = ((pos[0] - last_pos[0]) ** 2 + (pos[1] - last_pos[1]) ** 2 + (pos[2] - last_pos[2]) ** 2) ** 0.5
+            if dist < tolerance:
+                stable_count += 1
+            else:
+                stable_count = 0
+        last_pos = pos
+        if time.time() - start_time > max_wait:
+            print("❌ Timeout waiting for arrival.")
+            return False
+        time.sleep(check_interval)
+    return True
+
+def get_new_chat_lines(last_pos):
+    """Read new chat lines from the log file since last_pos. Returns (lines, new_pos)."""
+    lines = []
+    with open(LOG_PATH, 'r', encoding='utf-8') as f:
+        f.seek(last_pos)
+        while True:
+            line = f.readline()
+            if not line:
+                break
+            # Only process player chat messages (customize this filter as needed)
+            if "]: <" in line:
+                lines.append(line.strip())
+        new_pos = f.tell()
+    return lines, new_pos
+
+# --- Main Logic ---
+
+def farm_command(client: MCBot, player: str = None):
+    if player not in farms:
+        print(f"⚠️ Player '{player}' not found in farm dictionary.")
+        return False
+
+    fx, fy, fz = farms[player]
+    hx, hy, hz = HOME_COORDS
+
+    print(f"🚜 Starting farm routine for {player}...")
+
+    # Step 1: Go to farm
+    print(f"🚶 Walking to farm at ({fx}, {fy}, {fz})...")
+    client.goto(fx, fy, fz, tolerance=2)
+
+    # Step 2: Enable farming settings
+    print("⚙️ Enabling farming settings...")
+    client.send_chat_message("#settings allowBreak true")
+    time.sleep(0.5)
+    client.send_chat_message("#settings allowPlace true")
+    time.sleep(0.5)
+
+    # Step 3: Start farming
+    print("🌾 Starting farming...")
+    client.send_chat_message("#farm")
+    
+    # Wait for farming to complete
+    farming_success = wait_for_farm_completion(client)
+    
+    # Step 4: Disable settings
+    print("⚙️ Disabling farming settings...")
+    client.send_chat_message("#settings allowBreak false")
+    time.sleep(0.5)
+    client.send_chat_message("#settings allowPlace false")
+    time.sleep(0.5)
+
+    # Step 5: Return home (always return home regardless of farming success)
+    print(f"🏠 Returning home to ({hx}, {hy}, {hz})...")
+    client.goto(hx, hy, hz, tolerance=2)
+
+    if farming_success:
+        print(f"✅ Farming complete for {player}!")
+        return True
+    else:
+        print(f"❌ Farming failed for {player}, but returned home safely.")
+        return False
+
+def sleep_command(client: MCBot, bed_type: str = "white_bed"):
+    print(f"🛏️ Going to nearest {bed_type.replace('_', ' ')} with Baritone...")
+    client.send_chat_message(f"#goto {bed_type}")
+
+    # Wait for arrival by checking position stability
+    print("⏳ Waiting for arrival at bed...")
+    arrived = wait_for_arrival(client, tolerance=0.2, stable_required=1)
+    if not arrived:
+        print("Failed to arrive at bed in time.")
+        return False
+
+    # Now search for the nearest bed and right-click
+    print("🔎 Searching for bed to look at and right-click...")
+    x0, y0, z0, *_ = client.get_position()
+    blocks = client.get_blocks_in_range(5)
+    min_dist = float('inf')
+    bed_coords = None
+    for block in blocks:
+        if block.get('type', '').lower() == f'block{{minecraft:{bed_type}}}':
+            x, y, z = block.get('x', 0), block.get('y', 0), block.get('z', 0)
+            dist = ((x - x0) ** 2 + (y - y0) ** 2 + (z - z0) ** 2) ** 0.5
+            if dist < min_dist:
+                min_dist = dist
+                bed_coords = (x, y, z)
+    if bed_coords:
+        print(f"👀 Looking at {bed_type.replace('_', ' ')} at {bed_coords}")
+        client.look_at(*bed_coords)
+        time.sleep(0.5)
+        print("Right clicking")
+        client.press_right_click()
+        time.sleep(0.5)
+        client.release_right_click()
+    else:
+        print(f"❌ No {bed_type.replace('_', ' ')} found nearby!")
+    return True
+
+def home_command(client: MCBot):
+    hx, hy, hz = HOME_COORDS
+    print(f"🏠 Going home to ({hx}, {hy}, {hz})...")
+    client.goto(hx, hy, hz, tolerance=2)
+    print("⏳ Waiting for arrival at home...")
+    arrived = wait_for_arrival(client, tolerance=0.2, stable_required=3)
+    if arrived:
+        print("✅ Arrived at home!")
+        return True
+    else:
+        print("❌ Failed to arrive at home in time.")
+        return False
+
+def send_cmd(client: MCBot, cmd: str, player: str = None):
+    """Send a command using the MCBot API."""
+    if cmd.lower() == "farm":
+        return farm_command(client, player)
+    elif cmd.lower().startswith("sleep"):
+        parts = cmd.split()
+        bed_type = parts[1] if len(parts) > 1 else "white_bed"
+        return sleep_command(client, bed_type)
+    elif cmd.lower() == "home":
+        return home_command(client)
+    else:
+        print(f"💬 Sending command: {cmd}")
+        client.send_chat_message(cmd)
+        return True
+
+def get_player_status(client: MCBot):
+    """Get and display current player status."""
+    try:
+        x, y, z, yaw, pitch, health, max_health, food, level, experience = client.get_position()
+        print(f"\n📊 Player Status:")
+        print(f"   Location: ({x:.1f}, {y:.1f}, {z:.1f})")
+        print(f"   Rotation: Yaw {yaw:.1f}°, Pitch {pitch:.1f}°")
+        print(f"   Health: {health:.1f}/{max_health:.1f}")
+        print(f"   Food: {food}/20")
+        print(f"   Level: {level} (Total XP: {experience})")
+        return True
+    except Exception as e:
+        print(f"❌ Error getting player status: {e}")
+        return False
+
+# --- Entry Point ---
+
+def main():
+    print("🎮 Minecraft Ultron - GameQuery Edition")
+    print("=====================================")
+
+    client = MCBot()
+
+    # Test connection
+    print("\n🔗 Testing connection to GameQuery server...")
+    test_response = client.send_query({"type": "position"})
+    if test_response is None:
+        print("❌ Cannot connect to GameQuery server")
+        return
+
+    print("✅ Connected to GameQuery server!")
+    get_player_status(client)
+
+    # Get initial file size
+    with open(LOG_PATH, 'r', encoding='utf-8') as f:
+        f.seek(0, os.SEEK_END)
+        last_pos = f.tell()
+
+    print("\n🕵️ Listening for chat commands in Minecraft...")
+    while True:
+        lines = []
+        with open(LOG_PATH, 'r', encoding='utf-8') as f:
+            f.seek(last_pos)
+            while True:
+                line = f.readline()
+                if not line:
+                    break
+                lines.append(line.strip())
+            last_pos = f.tell()
+        for line in lines:
+            print(f"LOG: {line}")
+            user = None
+            msg = None
+            # Public chat: [CHAT] <User> command
+            if "[CHAT] <" in line:
+                try:
+                    user_and_msg = line.split("[CHAT] <", 1)[1]
+                    user, msg = user_and_msg.split(">", 1)
+                    user = user.strip()
+                    msg = msg.strip()
+                    print(f"📝 Detected chat from {user}: {msg}")
+                except Exception as e:
+                    print(f"Failed to parse chat line: {line} ({e})")
+                    continue
+            # Whisper: [CHAT] User whispers to you: command
+            elif "[CHAT]" in line and "whispers to you:" in line:
+                try:
+                    after_chat = line.split("[CHAT]", 1)[1].strip()
+                    user, msg = after_chat.split("whispers to you:", 1)
+                    user = user.strip()
+                    msg = msg.strip()
+                    print(f"📝 Detected whisper from {user}: {msg}")
+                except Exception as e:
+                    print(f"Failed to parse whisper line: {line} ({e})")
+                    continue
+            else:
+                continue
+
+            # Now handle commands as before
+            if msg is None or user is None:
+                continue
+            if msg.strip() == "farm":
+                client.send_chat_message("#farm")
+            elif msg.strip().startswith("farm home"):
+                send_cmd(client, "farm", user)
+            elif msg.startswith("sleep"):
+                send_cmd(client, msg, user)
+            elif msg.startswith("go home"):
+                send_cmd(client, "home", user)
+            elif msg.startswith("stop"):
+                client.send_chat_message("#stop")
+            elif msg.startswith("follow me"):
+                client.send_chat_message(f"#follow player {user}")
+            elif msg.startswith("find a "):
+                thing = msg[len("find a "):].strip()
+                if thing:
+                    client.send_chat_message(f"#goto {thing}")
+            # Add more commands as needed
+        time.sleep(2)
+
+if __name__ == "__main__":
+    main()
