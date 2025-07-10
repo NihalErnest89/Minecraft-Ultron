@@ -27,8 +27,10 @@ Automated Minecraft farming and utility bot using the GameQuery mod API. This pr
    Create a `.env` file in the project root with the following content:
    ```env
    LOG_PATH=C:\Users\yourname\AppData\Roaming\minecraft\logs\latest.log
+   BOT_NAME=YourMinecraftBotUsername
    ```
-   Replace the path with the location of your Minecraft `latest.log` file.
+   - `LOG_PATH` should point to your Minecraft `latest.log` file.
+   - `BOT_NAME` should be set to your bot's Minecraft username. This prevents the bot from responding to its own messages in chat.
 4. **Ensure Minecraft is running with the GameQuery mod loaded.**
 
 ## Usage
@@ -50,10 +52,19 @@ Automated Minecraft farming and utility bot using the GameQuery mod API. This pr
   This will present a simple menu for testing bot actions.
 
 ## Configuration
-- **Farms and Home Coordinates:**
-  Edit the `farms` and `HOME_COORDS` dictionaries in `scripts.py` to match your world and player setup.
+- **Dynamic Farm Coordinates:**
+  - Players can set their farm location in-game by saying:
+    ```
+    my farm is at x y z
+    ```
+    (Replace `x y z` with your farm's coordinates.)
+  - The bot will save these coordinates to a `farms.txt` file and use them for future farming commands.
+- **Home Coordinates:**
+  - Edit the `HOME_COORDS` variable in `scripts.py` to set your home location.
 - **Log Path:**
-  Set the `LOG_PATH` variable in your `.env` file to point to your Minecraft `latest.log`.
+  - Set the `LOG_PATH` variable in your `.env` file to point to your Minecraft `latest.log`.
+- **Bot Username:**
+  - Set the `BOT_NAME` variable in your `.env` file to your bot's Minecraft username to prevent it from responding to its own messages.
 
 ## Example Chat Commands
 - `farm home` — Start the farming routine and return home
