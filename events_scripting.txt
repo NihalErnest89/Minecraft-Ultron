@@ -1,0 +1,18 @@
+events.onTickEnd(() => {
+    if (player.getHealth() < 5) {
+        player.disconnect("", "Low HP");
+    }
+    
+    if (player.getFood() < 2) {
+        player.disconnect("", "Low food");
+    }
+
+    if (player.getFood() > 7) {
+        autoDrop.dropItems();
+    }
+
+    let screenTitle = containers.getScreenTitle();
+    if (screenTitle.toLower().contains("chest")) {
+        containerButtons.smartPut();
+    }
+});

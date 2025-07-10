@@ -11,6 +11,7 @@ import os
 import keyboard
 import importlib.util
 from dotenv import load_dotenv
+import ast
 
 # Import MCBot class from the mc-bot.py file
 spec = importlib.util.spec_from_file_location("mc_bot", "mc-bot.py")
@@ -22,11 +23,28 @@ MCBot = mc_bot.MCBot
 
 load_dotenv()
 LOG_PATH = os.environ["LOG_PATH"] # path to your latest.log
+BOT_NAME = os.environ.get("BOT_NAME", "IronManForever")
 
-farms = {
-    "Ironman02": (-4152, 67, 4256),
-    "Steve": (-4100, 65, 4300),
-}
+FARMS_FILE = "farms.txt"
+
+def load_farms():
+    farms = {}
+    if os.path.exists(FARMS_FILE):
+        with open(FARMS_FILE, 'r') as f:
+            for line in f:
+                if '=' in line:
+                    name, coords = line.strip().split('=', 1)
+                    farms[name] = ast.literal_eval(coords)
+    return farms
+
+def save_farm(player, coords):
+    farms = load_farms()
+    farms[player] = coords
+    with open(FARMS_FILE, 'w') as f:
+        for name, c in farms.items():
+            f.write(f"{name}={list(c)}\n")
+
+farms = load_farms()
 
 HOME_COORDS = (-4188, 59, 4259)
 
@@ -148,7 +166,15 @@ def farm_command(client: MCBot, player: str = None):
     client.send_chat_message("#settings allowPlace false")
     time.sleep(0.5)
 
-    # Step 5: Return home (always return home regardless of farming success)
+    # Step 5: Go to farm coords again, then to chest
+    print(f"🔄 Returning to farm at ({fx}, {fy}, {fz}) to deposit items...")
+    client.goto(fx, fy, fz, tolerance=2)
+    print("📦 Going to chest...")
+    client.send_chat_message("#goto chest")
+    print("⏳ Waiting for arrival at chest...")
+    wait_for_arrival(client, tolerance=0.2, stable_required=2)
+
+    # Step 6: Return home (always return home regardless of farming success)
     print(f"🏠 Returning home to ({hx}, {hy}, {hz})...")
     client.goto(hx, hy, hz, tolerance=2)
 
@@ -283,6 +309,8 @@ def main():
                     user, msg = user_and_msg.split(">", 1)
                     user = user.strip()
                     msg = msg.strip()
+                    if user == BOT_NAME:
+                        continue  # Ignore messages sent by the bot itself
                     print(f"📝 Detected chat from {user}: {msg}")
                 except Exception as e:
                     print(f"Failed to parse chat line: {line} ({e})")
@@ -294,12 +322,30 @@ def main():
                     user, msg = after_chat.split("whispers to you:", 1)
                     user = user.strip()
                     msg = msg.strip()
+                    if user == BOT_NAME:
+                        continue  # Ignore messages sent by the bot itself
                     print(f"📝 Detected whisper from {user}: {msg}")
                 except Exception as e:
                     print(f"Failed to parse whisper line: {line} ({e})")
                     continue
             else:
                 continue
+
+            # Check for farm set command
+            if msg and msg.lower().startswith("my farm is at"):
+                try:
+                    coords = msg.lower().replace("my farm is at", "").strip().split()
+                    if len(coords) == 3:
+                        coords = tuple(map(float, coords))
+                        save_farm(user, coords)
+                        global farms
+                        farms = load_farms()
+                        print(f"✅ Set farm for {user} to {coords}")
+                        client.send_chat_message(f"Your farm is at {coords}")
+                        continue
+                except Exception as e:
+                    print(f"❌ Failed to set farm for {user}: {e}")
+                    continue
 
             # Now handle commands as before
             if msg is None or user is None:

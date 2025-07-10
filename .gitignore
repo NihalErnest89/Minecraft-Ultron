@@ -3,6 +3,8 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+farms.txt
+
 # C extensions
 *.so
 
