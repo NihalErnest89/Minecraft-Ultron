@@ -69,7 +69,7 @@ Automated Minecraft farming and utility bot using the GameQuery mod API. This pr
 ## Example Chat Commands
 - `farm home` — Start the farming routine and return home
 - `farm` - Starts farming the nearest farm
-- `sleep` — Go to the nearest bed and sleep
+- `sleep` — Go to the nearest bed and sleep. (Currently works only if bot window is open and unpaused)
 - `go home` — Return to home coordinates
 - `stop` — Stop the current action
 - `follow me` — Follow the player issuing the command
