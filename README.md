@@ -78,3 +78,5 @@ Automated Minecraft farming and utility bot using the GameQuery mod API. This pr
 ## Notes
 - This bot is designed for use with the GameQuery mod and will not work with other Minecraft mod setups.
 - Make sure you are in a multiplayer world with GameQuery setup before running the bot.
+- **Cheat Utils Integration:**
+  - For full functionality, make sure to update the `events_scripting.txt` file in the Cheat Utils UI with the provided or required event scripts.
