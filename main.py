@@ -191,34 +191,61 @@ def sleep_command(client: MCBot, bed_type: str = "white_bed"):
 
     # Wait for arrival by checking position stability
     print("⏳ Waiting for arrival at bed...")
-    arrived = wait_for_arrival(client, tolerance=0.2, stable_required=1)
+    arrived = wait_for_arrival(client, tolerance=0.2, stable_required=2)
     if not arrived:
         print("Failed to arrive at bed in time.")
         return False
 
-    # Now search for the nearest bed and right-click
-    print("🔎 Searching for bed to look at and right-click...")
-    x0, y0, z0, *_ = client.get_position()
-    blocks = client.get_blocks_in_range(5)
-    min_dist = float('inf')
-    bed_coords = None
-    for block in blocks:
-        if block.get('type', '').lower() == f'block{{minecraft:{bed_type}}}':
-            x, y, z = block.get('x', 0), block.get('y', 0), block.get('z', 0)
-            dist = ((x - x0) ** 2 + (y - y0) ** 2 + (z - z0) ** 2) ** 0.5
-            if dist < min_dist:
-                min_dist = dist
-                bed_coords = (x, y, z)
-    if bed_coords:
-        print(f"👀 Looking at {bed_type.replace('_', ' ')} at {bed_coords}")
-        client.look_at(*bed_coords)
-        time.sleep(0.5)
-        print("Right clicking")
-        client.press_right_click()
-        time.sleep(0.5)
-        client.release_right_click()
-    else:
-        print(f"❌ No {bed_type.replace('_', ' ')} found nearby!")
+    # Try to find and interact with the bed, but don't crash if it fails
+    try:
+        print("🔎 Searching for bed to look at and right-click...")
+        x0, y0, z0, *_ = client.get_position()
+        if x0 is None:  # Check if position call failed
+            print("⚠️ Could not get current position, skipping bed interaction")
+            return True
+            
+        blocks = client.get_blocks_in_range(3)  # Reduced range to prevent overload
+        if not blocks:  # Check if block scanning failed
+            print("⚠️ Could not scan for blocks, trying simple right-click")
+            time.sleep(0.5)
+            client.press_right_click()
+            time.sleep(0.5)
+            client.release_right_click()
+            return True
+            
+        min_dist = float('inf')
+        bed_coords = None
+        for block in blocks:
+            if block.get('type', '').lower() == f'block{{minecraft:{bed_type}}}':
+                x, y, z = block.get('x', 0), block.get('y', 0), block.get('z', 0)
+                dist = ((x - x0) ** 2 + (y - y0) ** 2 + (z - z0) ** 2) ** 0.5
+                if dist < min_dist:
+                    min_dist = dist
+                    bed_coords = (x, y, z)
+        if bed_coords:
+            print(f"👀 Looking at {bed_type.replace('_', ' ')} at {bed_coords}")
+            client.look_at(*bed_coords)
+            time.sleep(0.5)
+            print("Right clicking")
+            client.press_right_click()
+            time.sleep(0.5)
+            client.release_right_click()
+        else:
+            print(f"⚠️ No {bed_type.replace('_', ' ')} found nearby, trying simple right-click")
+            time.sleep(0.5)
+            client.press_right_click()
+            time.sleep(0.5)
+            client.release_right_click()
+    except Exception as e:
+        print(f"⚠️ Error during bed interaction: {e}")
+        print("Trying simple right-click as fallback...")
+        try:
+            time.sleep(0.5)
+            client.press_right_click()
+            time.sleep(0.5)
+            client.release_right_click()
+        except Exception as e2:
+            print(f"❌ Fallback right-click also failed: {e2}")
     return True
 
 def home_command(client: MCBot):
@@ -362,6 +389,7 @@ def main():
                 client.send_chat_message("#stop")
             elif msg.startswith("follow me"):
                 client.send_chat_message(f"#follow player {user}")
+                client.send_chat_message(f"Ok komrad")
             elif msg.startswith("find a "):
                 thing = msg[len("find a "):].strip()
                 if thing:
