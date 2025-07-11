@@ -198,7 +198,7 @@ def sleep_command(client: MCBot, bed_type: str = "white_bed"):
 
     # Try to find and interact with the bed, but don't crash if it fails
     try:
-        print("🔎 Searching for bed to look at and right-click...")
+        print("🔎 Searching for bed to look at and use...")
         x0, y0, z0, *_ = client.get_position()
         if x0 is None:  # Check if position call failed
             print("⚠️ Could not get current position, skipping bed interaction")
@@ -206,14 +206,11 @@ def sleep_command(client: MCBot, bed_type: str = "white_bed"):
             
         blocks = client.get_blocks_in_range(3)  # Reduced range to prevent overload
         if not blocks:  # Check if block scanning failed
-            print("⚠️ Could not scan for blocks, trying simple right-click")
-            time.sleep(0.5)
-            client.press_right_click()
-            time.sleep(0.5)
-            client.release_right_click()
+            print("⚠️ Could not scan for blocks, trying simple bed use")
+            client.use_bed()
             return True
             
-        min_dist = float('inf')
+        min_dist = 1000
         bed_coords = None
         for block in blocks:
             if block.get('type', '').lower() == f'block{{minecraft:{bed_type}}}':
@@ -223,29 +220,23 @@ def sleep_command(client: MCBot, bed_type: str = "white_bed"):
                     min_dist = dist
                     bed_coords = (x, y, z)
         if bed_coords:
+            client.send_chat_message("Zzzz")
             print(f"👀 Looking at {bed_type.replace('_', ' ')} at {bed_coords}")
             client.look_at(*bed_coords)
             time.sleep(0.5)
-            print("Right clicking")
-            client.press_right_click()
-            time.sleep(0.5)
-            client.release_right_click()
+            print("Using bed")
+            client.use_bed(bed_coords[0], bed_coords[1], bed_coords[2])
         else:
-            print(f"⚠️ No {bed_type.replace('_', ' ')} found nearby, trying simple right-click")
-            time.sleep(0.5)
-            client.press_right_click()
-            time.sleep(0.5)
-            client.release_right_click()
+            print(f"⚠️ No {bed_type.replace('_', ' ')} found nearby, trying simple bed use")
+            client.use_bed()
     except Exception as e:
         print(f"⚠️ Error during bed interaction: {e}")
-        print("Trying simple right-click as fallback...")
+        print("Trying simple bed use as fallback...")
         try:
-            time.sleep(0.5)
-            client.press_right_click()
-            time.sleep(0.5)
-            client.release_right_click()
+            client.use_bed()
         except Exception as e2:
-            print(f"❌ Fallback right-click also failed: {e2}")
+            print(f"❌ Fallback bed use also failed: {e2}")
+
     return True
 
 def home_command(client: MCBot):
@@ -261,6 +252,33 @@ def home_command(client: MCBot):
         print("❌ Failed to arrive at home in time.")
         return False
 
+def crops_home_command(client: MCBot, player: str = None):
+    if player not in farms:
+        print(f"⚠️ Player '{player}' not found in farm dictionary.")
+        return False
+
+    fx, fy, fz = farms[player]
+    hx, hy, hz = HOME_COORDS
+
+    print(f"🌾 Starting crops home routine for {player}...")
+
+    # Step 1: Go to farm
+    print(f"🚶 Walking to farm at ({fx}, {fy}, {fz})...")
+    client.goto(fx, fy, fz, tolerance=2)
+
+    # Step 2: Go to chest
+    print("📦 Going to chest...")
+    client.send_chat_message("#goto chest")
+    print("⏳ Waiting for arrival at chest...")
+    wait_for_arrival(client, tolerance=0.2, stable_required=2)
+
+    # Step 3: Return home
+    print(f"🏠 Returning home to ({hx}, {hy}, {hz})...")
+    client.goto(hx, hy, hz, tolerance=2)
+
+    print(f"✅ Crops home complete for {player}!")
+    return True
+
 def send_cmd(client: MCBot, cmd: str, player: str = None):
     """Send a command using the MCBot API."""
     if cmd.lower() == "farm":
@@ -271,6 +289,23 @@ def send_cmd(client: MCBot, cmd: str, player: str = None):
         return sleep_command(client, bed_type)
     elif cmd.lower() == "home":
         return home_command(client)
+    elif cmd.lower() == "crops home":
+        return crops_home_command(client, player)
+    elif cmd.lower().startswith("go to "):
+        try:
+            coords = cmd.lower().replace("go to ", "").strip().split()
+            if len(coords) == 3:
+                x, y, z = map(float, coords)
+                print(f"🚶 Going to coordinates ({x}, {y}, {z})...")
+                client.goto(x, y, z, tolerance=2)
+                print(f"✅ Arrived at ({x}, {y}, {z})!")
+                return True
+            else:
+                print("❌ Invalid coordinates. Use format: go to x y z")
+                return False
+        except ValueError:
+            print("❌ Invalid coordinates. Use format: go to x y z")
+            return False
     else:
         print(f"💬 Sending command: {cmd}")
         client.send_chat_message(cmd)
@@ -381,19 +416,53 @@ def main():
                 client.send_chat_message("#farm")
             elif msg.strip().startswith("farm home"):
                 send_cmd(client, "farm", user)
+            elif msg.strip().startswith("crops home"):
+                send_cmd(client, "crops home", user)
             elif msg.startswith("sleep"):
+                send_cmd(client, msg, user)
+            elif msg.startswith("go to "):
                 send_cmd(client, msg, user)
             elif msg.startswith("go home"):
                 send_cmd(client, "home", user)
             elif msg.startswith("stop"):
                 client.send_chat_message("#stop")
+                client.send_chat_message(f"#allowBreak false")
             elif msg.startswith("follow me"):
                 client.send_chat_message(f"#follow player {user}")
                 client.send_chat_message(f"Ok komrad")
+                # Wait a moment for the follow command to process
+                time.sleep(2)
+                
+                # Check if follow failed by looking for error in recent log entries
+                with open(LOG_PATH, 'r', encoding='utf-8') as f:
+                    f.seek(0, os.SEEK_END)
+                    f.seek(max(0, f.tell() - 1000))  # Check last 1000 characters
+                    recent_log = f.read()
+                    
+                    if "No valid entities in range!" in recent_log:
+                        print(f"⚠️ Follow failed for {user}, trying to find player location...")
+                        
+                        # Get player coordinates and go there
+                        coords = client.get_player_coords(user)
+                        if coords:
+                            x, y, z = coords
+                            print(f"📍 Found {user} at ({x}, {y}, {z}), going there...")
+                            client.send_chat_message(f"#goto {x} {y} {z}")
+                        else:
+                            print(f"❌ Could not find player {user} in the world")
+                    else:
+                        print(f"✅ Following {user}")
             elif msg.startswith("find a "):
                 thing = msg[len("find a "):].strip()
                 if thing:
                     client.send_chat_message(f"#goto {thing}")
+            elif msg.startswith("mine "):
+                block = msg[len("mine "):].strip()
+                if block:
+                    client.send_chat_message(f"#allowBreak true")
+                    print(f"⛏️ Mining {block}...")
+                    client.send_chat_message(f"#mine {block}")
+                    client.send_chat_message(f"Mining {block} away (till you say stop)!")
             # Add more commands as needed
         time.sleep(2)
 

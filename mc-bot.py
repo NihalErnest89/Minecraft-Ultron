@@ -165,6 +165,62 @@ class MCBot:
             if "error" in response:
                 print(f"❌ Error: {response['error']}")
 
+    def use_bed(self, x=None, y=None, z=None):
+        """Use the bed the player is looking at, or at specific coordinates if provided."""
+        if x is not None and y is not None and z is not None:
+            query = {"type": "use_bed", "x": x, "y": y, "z": z}
+        else:
+            query = {"type": "use_bed"}
+        response = self.send_query(query)
+        
+        print(f"🛏️ Use bed response: {response}")
+        if response:
+            # Handle new response format with 'result' field
+            result = response.get("result")
+            if result:
+                if result.get("success"):
+                    print("✅ Bed used successfully")
+                else:
+                    print(f"❌ Error: {result.get('error', 'Unknown error')}")
+            elif "error" in response:
+                print(f"❌ Error: {response['error']}")
+            else:
+                print("✅ Bed used successfully (legacy response)")
+        return response
+
+    def get_players(self):
+        """Get all players in the world."""
+        response = self.send_query({"type": "players"})
+        
+        if response:
+            if "error" in response:
+                print(f"❌ Error: {response['error']}")
+                return None
+            else:
+                print(f"🔍 Players response: {response}")
+                return response.get("players", [])
+        return None
+
+    def get_player_coords(self, player_name: str):
+        """Get coordinates of a specific player by name."""
+        print(f"🔍 Getting coordinates for player: {player_name}")
+        players = self.get_players()
+        if players:
+            print(f"🔍 Players list: {players}")
+            for player in players:
+                print(f"🔍 Checking player: {player} (type: {type(player)})")
+                # Handle different possible formats
+                if isinstance(player, dict):
+                    if player.get("name") == player_name:
+                        coords = (player["x"], player["y"], player["z"])
+                        print(f"📍 Found {player_name} at coordinates: {coords}")
+                        return coords
+                elif isinstance(player, str) and player == player_name:
+                    print(f"⚠️ Player {player_name} found but no coordinates available")
+                    return None
+        print(f"❌ Player {player_name} not found")
+        return None
+
     def cheat_utils_post(self, endpoint: str, payload: dict):
         try:
             url = f"http://localhost:5005/api/{endpoint}"
