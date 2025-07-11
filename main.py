@@ -26,6 +26,7 @@ LOG_PATH = os.environ["LOG_PATH"] # path to your latest.log
 BOT_NAME = os.environ.get("BOT_NAME", "IronManForever")
 
 FARMS_FILE = "farms.txt"
+WAYPOINTS_FILE = "waypoints.txt"
 
 def load_farms():
     farms = {}
@@ -45,6 +46,26 @@ def save_farm(player, coords):
             f.write(f"{name}={list(c)}\n")
 
 farms = load_farms()
+
+def load_waypoints():
+    waypoints = {}
+    if os.path.exists(WAYPOINTS_FILE):
+        with open(WAYPOINTS_FILE, 'r') as f:
+            for line in f:
+                if '=' in line:
+                    name, coords = line.strip().split('=', 1)
+                    coords = tuple(map(float, coords.strip().split()))
+                    waypoints[name] = coords
+    return waypoints
+
+def save_waypoint(name, coords):
+    waypoints = load_waypoints()
+    waypoints[name] = coords
+    with open(WAYPOINTS_FILE, 'w') as f:
+        for n, c in waypoints.items():
+            f.write(f"{n}={' '.join(map(str, c))}\n")
+
+waypoints = load_waypoints()
 
 HOME_COORDS = (-4188, 59, 4259)
 
@@ -292,20 +313,31 @@ def send_cmd(client: MCBot, cmd: str, player: str = None):
     elif cmd.lower() == "crops home":
         return crops_home_command(client, player)
     elif cmd.lower().startswith("go to "):
+        arg = cmd[6:].strip()
+        # Try to interpret as coordinates first
+        coords = None
         try:
-            coords = cmd.lower().replace("go to ", "").strip().split()
-            if len(coords) == 3:
-                x, y, z = map(float, coords)
-                print(f"🚶 Going to coordinates ({x}, {y}, {z})...")
-                client.goto(x, y, z, tolerance=2)
-                print(f"✅ Arrived at ({x}, {y}, {z})!")
+            coords = tuple(map(float, arg.split()))
+        except Exception:
+            coords = None
+        if coords and len(coords) == 3:
+            print(f"🚶 Going to coordinates {coords}...")
+            client.goto(*coords, tolerance=2)
+            print(f"✅ Arrived at {coords}!")
+            return True
+        else:
+            global waypoints
+            waypoints = load_waypoints()
+            print(f"🔎 Available waypoints: {list(waypoints.keys())}")
+            if arg in waypoints:
+                coords = waypoints[arg]
+                print(f"🚶 Going to waypoint '{arg}' at {coords}...")
+                client.send_chat_message(f"#goto {coords[0]} {coords[1]} {coords[2]}")
+                print(f"✅ Sent #goto for waypoint '{arg}'!")
                 return True
             else:
-                print("❌ Invalid coordinates. Use format: go to x y z")
+                print(f"❌ No such waypoint or invalid coordinates: {arg}")
                 return False
-        except ValueError:
-            print("❌ Invalid coordinates. Use format: go to x y z")
-            return False
     else:
         print(f"💬 Sending command: {cmd}")
         client.send_chat_message(cmd)
@@ -329,6 +361,7 @@ def get_player_status(client: MCBot):
 # --- Entry Point ---
 
 def main():
+    global waypoints
     print("🎮 Minecraft Ultron - GameQuery Edition")
     print("=====================================")
 
@@ -463,6 +496,44 @@ def main():
                     print(f"⛏️ Mining {block}...")
                     client.send_chat_message(f"#mine {block}")
                     client.send_chat_message(f"Mining {block} away (till you say stop)!")
+            elif msg.startswith("set "):
+                parts = msg.split()
+                if len(parts) == 5 and parts[2].replace('.', '', 1).replace('-', '', 1).isdigit():
+                    name = parts[1]
+                    try:
+                        coords = tuple(map(float, parts[2:5]))
+                        save_waypoint(name, coords)
+                        global waypoints
+                        waypoints = load_waypoints()
+                        print(f"✅ Set waypoint '{name}' to {coords}")
+                        client.send_chat_message(f"'{name}' is set to {coords}")
+                    except Exception as e:
+                        print(f"❌ Failed to set waypoint: {e}")
+                else:
+                    print("❌ Usage: set <name> <x> <y> <z>")
+            elif msg.startswith("go to "):
+                arg = msg[len("go to "):].strip()
+                # Try to interpret as coordinates first
+                coords = None
+                try:
+                    coords = tuple(map(float, arg.split()))
+                except Exception:
+                    coords = None
+                if coords and len(coords) == 3:
+                    print(f"🚶 Going to coordinates {coords}...")
+                    client.goto(*coords, tolerance=2)
+                    print(f"✅ Arrived at {coords}!")
+                else:
+                    # Always reload waypoints in case they were updated
+                    waypoints = load_waypoints()
+                    print(f"🔎 Available waypoints: {list(waypoints.keys())}")
+                    if arg in waypoints:
+                        coords = waypoints[arg]
+                        print(f"🚶 Going to waypoint '{arg}' at {coords}...")
+                        client.send_chat_message(f"#goto {coords[0]} {coords[1]} {coords[2]}")
+                        print(f"✅ Sent #goto for waypoint '{arg}'!")
+                    else:
+                        print(f"❌ No such waypoint or invalid coordinates: {arg}")
             # Add more commands as needed
         time.sleep(2)
 

@@ -168,7 +168,7 @@ class MCBot:
     def use_bed(self, x=None, y=None, z=None):
         """Use the bed the player is looking at, or at specific coordinates if provided."""
         if x is not None and y is not None and z is not None:
-            query = {"type": "use_bed", "x": x, "y": y, "z": z}
+            query = {"type": "use_bed", "x": int(x), "y": int(y), "z": int(z)}
         else:
             query = {"type": "use_bed"}
         response = self.send_query(query)
